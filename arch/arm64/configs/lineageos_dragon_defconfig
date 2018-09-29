@@ -665,3 +665,6 @@ CONFIG_CIFS_FSCACHE=y
 # CONFIG_AFS_FS is not set
 CONFIG_CRYPTO_MD4=y
 CONFIG_OID_REGISTRY=y
+
+# newly added configurations
+CONFIG_AIO=y
