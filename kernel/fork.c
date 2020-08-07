@@ -74,7 +74,6 @@
 #include <linux/uprobes.h>
 #include <linux/aio.h>
 #include <linux/compiler.h>
-#include <linux/kcov.h>
 
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
@@ -338,6 +337,8 @@ static struct task_struct *dup_task_struct(struct task_struct *orig)
 	if (err)
 		goto free_ti;
 
+	tsk->flags &= ~PF_SU;
+
 	tsk->stack = ti;
 #ifdef CONFIG_SECCOMP
 	/*
@@ -370,8 +371,6 @@ static struct task_struct *dup_task_struct(struct task_struct *orig)
 	tsk->task_frag.page = NULL;
 
 	account_kernel_stack(ti, 1);
-
-	kcov_task_init(tsk);
 
 	return tsk;
 

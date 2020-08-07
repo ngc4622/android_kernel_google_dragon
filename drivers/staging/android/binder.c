@@ -405,7 +405,6 @@ static int task_get_unused_fd_flags(struct binder_proc *proc, int flags)
 	struct files_struct *files = proc->files;
 	unsigned long rlim_cur;
 	unsigned long irqs;
-	int ret;
 
 	if (files == NULL)
 		return -ESRCH;
@@ -416,11 +415,7 @@ static int task_get_unused_fd_flags(struct binder_proc *proc, int flags)
 	rlim_cur = task_rlimit(proc->tsk, RLIMIT_NOFILE);
 	unlock_task_sighand(proc->tsk, &irqs);
 
-	preempt_enable_no_resched();
-	ret = __alloc_fd(files, 0, rlim_cur, flags);
-	preempt_disable();
-
-	return ret;
+	return __alloc_fd(files, 0, rlim_cur, flags);
 }
 
 /*
@@ -429,11 +424,8 @@ static int task_get_unused_fd_flags(struct binder_proc *proc, int flags)
 static void task_fd_install(
 	struct binder_proc *proc, unsigned int fd, struct file *file)
 {
-	if (proc->files) {
-		preempt_enable_no_resched();
+	if (proc->files)
 		__fd_install(proc->files, fd, file);
-		preempt_disable();
-	}
 }
 
 /*
@@ -2149,7 +2141,7 @@ static void binder_transaction(struct binder_proc *proc,
 	if (!IS_ALIGNED(extra_buffers_size, sizeof(u64))) {
 		binder_user_error("%d:%d got transaction with unaligned buffers size, %lld\n",
 				  proc->pid, thread->pid,
-				  extra_buffers_size);
+				  (u64)extra_buffers_size);
 		return_error = BR_FAILED_REPLY;
 		goto err_bad_offset;
 	}
@@ -2694,7 +2686,7 @@ static int binder_thread_write(struct binder_proc *proc,
 			if (get_user_preempt_disabled(cookie, (binder_uintptr_t __user *)ptr))
 				return -EFAULT;
 
-			ptr += sizeof(void *);
+			ptr += sizeof(cookie);
 			list_for_each_entry(w, &proc->delivered_death, entry) {
 				struct binder_ref_death *tmp_death = container_of(w, struct binder_ref_death, work);
 

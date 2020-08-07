@@ -244,10 +244,10 @@ static struct ion_buffer *ion_buffer_create(struct ion_heap *heap,
 			"heap->ops->map_dma should return ERR_PTR on error"))
 		table = ERR_PTR(-EINVAL);
 	if (IS_ERR(table)) {
-		heap->ops->free(buffer);
-		kfree(buffer);
-		return ERR_CAST(table);
+		ret = -EINVAL;
+		goto err1;
 	}
+
 	buffer->sg_table = table;
 	if (ion_buffer_fault_user_mappings(buffer)) {
 		int num_pages = PAGE_ALIGN(buffer->size) / PAGE_SIZE;
@@ -257,7 +257,7 @@ static struct ion_buffer *ion_buffer_create(struct ion_heap *heap,
 		buffer->pages = vmalloc(sizeof(struct page *) * num_pages);
 		if (!buffer->pages) {
 			ret = -ENOMEM;
-			goto err1;
+			goto err;
 		}
 
 		for_each_sg(table->sgl, sg, table->nents, i) {
@@ -266,9 +266,6 @@ static struct ion_buffer *ion_buffer_create(struct ion_heap *heap,
 			for (j = 0; j < sg->length / PAGE_SIZE; j++)
 				buffer->pages[k++] = page++;
 		}
-
-		if (ret)
-			goto err;
 	}
 
 	buffer->dev = dev;
@@ -294,10 +291,8 @@ static struct ion_buffer *ion_buffer_create(struct ion_heap *heap,
 
 err:
 	heap->ops->unmap_dma(heap, buffer);
-	heap->ops->free(buffer);
 err1:
-	if (buffer->pages)
-		vfree(buffer->pages);
+	heap->ops->free(buffer);
 err2:
 	kfree(buffer);
 	return ERR_PTR(ret);
@@ -1662,13 +1657,13 @@ struct ion_handle *ion_import_dma_buf(struct ion_client *client, int fd)
 		mutex_unlock(&client->lock);
 		goto end;
 	}
-	mutex_unlock(&client->lock);
 
 	handle = ion_handle_create(client, buffer);
-	if (IS_ERR(handle))
+	if (IS_ERR(handle)) {
+		mutex_unlock(&client->lock);
 		goto end;
+	}
 
-	mutex_lock(&client->lock);
 	ret = ion_handle_add(client, handle);
 	mutex_unlock(&client->lock);
 	if (ret) {
@@ -2101,7 +2096,6 @@ static const struct file_operations debug_heap_fops = {
 	.release = single_release,
 };
 
-#ifdef DEBUG_HEAP_SHRINKER
 static int debug_shrink_set(void *data, u64 val)
 {
 	struct ion_heap *heap = data;
@@ -2109,15 +2103,14 @@ static int debug_shrink_set(void *data, u64 val)
 	int objs;
 
 	sc.gfp_mask = -1;
-	sc.nr_to_scan = 0;
+	sc.nr_to_scan = val;
 
-	if (!val)
-		return 0;
+	if (!val) {
+		objs = heap->shrinker.count_objects(&heap->shrinker, &sc);
+		sc.nr_to_scan = objs;
+	}
 
-	objs = heap->shrinker.shrink(&heap->shrinker, &sc);
-	sc.nr_to_scan = objs;
-
-	heap->shrinker.shrink(&heap->shrinker, &sc);
+	heap->shrinker.scan_objects(&heap->shrinker, &sc);
 	return 0;
 }
 
@@ -2130,14 +2123,13 @@ static int debug_shrink_get(void *data, u64 *val)
 	sc.gfp_mask = -1;
 	sc.nr_to_scan = 0;
 
-	objs = heap->shrinker.shrink(&heap->shrinker, &sc);
+	objs = heap->shrinker.count_objects(&heap->shrinker, &sc);
 	*val = objs;
 	return 0;
 }
 
 DEFINE_SIMPLE_ATTRIBUTE(debug_shrink_fops, debug_shrink_get,
 			debug_shrink_set, "%llu\n");
-#endif
 
 void ion_device_add_heap(struct ion_device *dev, struct ion_heap *heap)
 {
@@ -2172,8 +2164,7 @@ void ion_device_add_heap(struct ion_device *dev, struct ion_heap *heap)
 			path, heap->name);
 	}
 
-#ifdef DEBUG_HEAP_SHRINKER
-	if (heap->shrinker.shrink) {
+	if (heap->shrinker.count_objects && heap->shrinker.scan_objects) {
 		char debug_name[64];
 
 		snprintf(debug_name, 64, "%s_shrink", heap->name);
@@ -2188,7 +2179,7 @@ void ion_device_add_heap(struct ion_device *dev, struct ion_heap *heap)
 				path, debug_name);
 		}
 	}
-#endif
+
 	up_write(&dev->lock);
 }
 
